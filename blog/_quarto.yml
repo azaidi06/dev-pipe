@@ -1,0 +1,27 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "EagleSwing Blog"
+  navbar:
+    right:
+      - text: "Docs"
+        href: https://azaidi06.github.io/dev-pipe/
+      - icon: github
+        href: https://github.com/azaidi06/dev-pipe
+
+  listing:
+    contents: posts
+    sort: "date desc"
+    type: default
+    categories: true
+
+format:
+  html:
+    theme:
+      light: flatly
+      dark: darkly
+    toc: true
+
+freeze: true

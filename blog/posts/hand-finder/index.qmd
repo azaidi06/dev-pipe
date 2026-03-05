@@ -1,0 +1,43 @@
+---
+title: "Post-Swing Hand Detection and Finger Counting"
+author: "Ali Zaidi"
+date: "2025-11-10"
+categories: [hand-finder, detection]
+---
+
+## Detecting the Score Hand
+
+After a golf swing, players often raise a hand to signal their score (number of fingers = subjective swing quality). The hand finder module detects these hand-raise events and predicts the finger count.
+
+### Two-Stage Pipeline
+
+**Stage 1: Hand raise detection** (pure numpy, runs on Lambda)
+
+- Scan post-swing frames for one wrist above the shoulder while the other stays below
+- Find "plateau" regions where the raised wrist is stable (not still moving)
+- Select the representative frame from the plateau for finger counting
+
+**Stage 2: Finger count prediction** (EfficientNet-B0, optional GPU)
+
+- Crop the hand region from the representative frame
+- Run through a trained classifier: 1-5 fingers
+- Supports both ONNX and PyTorch backends
+
+```python
+from eagle_swing.hand_finder.config import HandFinderConfig
+from eagle_swing.hand_finder.detect import find_score_hands
+
+cfg = HandFinderConfig()
+results = find_score_hands(keypoints, scores, cfg)
+
+for r in results:
+    if r is not None:
+        print(f"Hand raised: {r.side}, frames {r.hand_frame_range}")
+```
+
+### Key Design Decisions
+
+- **Confidence filtering**: Only consider frames where wrist confidence exceeds threshold
+- **Minimum raise duration**: Hand must be raised for at least 40 frames (~0.67s at 60fps) to count
+- **Plateau detection**: Avoids catching mid-motion frames where the hand is still moving up
+- **Side detection**: Determines LEFT vs RIGHT hand based on which wrist is higher

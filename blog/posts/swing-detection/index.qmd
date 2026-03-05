@@ -1,0 +1,44 @@
+---
+title: "Swing Detection: From Wrist Signals to Backswing Apex"
+author: "Ali Zaidi"
+date: "2025-10-15"
+categories: [detection, signal-processing]
+---
+
+## How Swing Detection Works
+
+The core insight: during a golf backswing, the wrists move up and back simultaneously. By combining the x and y coordinates of both wrists into a single signal, we get a clear periodic pattern where each valley corresponds to a backswing apex.
+
+### Signal Pipeline
+
+1. **Extract wrist coordinates** from COCO-17 keypoints (indices 9 and 10)
+2. **Interpolate low-confidence frames** where pose estimation lost track
+3. **Combine signals**: `(left_x + right_x) / 2 + (left_y + right_y) / 2`
+4. **Savitzky-Golay smoothing** (window=9, poly=3) to remove noise
+5. **Peak detection** via `scipy.signal.find_peaks` with prominence and distance filters
+6. **Multi-stage filtering**: deduplication, end-of-video trim, too-close merge, MAD outlier removal, follow-through rejection
+
+### Contact Detection
+
+After finding each backswing apex, we search forward in a window `[apex + min_offset, apex + max_offset]` for the contact/impact point. The contact frame is where the smoothed signal reaches its maximum in the downswing region.
+
+```python
+from eagle_swing.detection.backswing import detect_backswings
+from eagle_swing.detection.contact import detect_contacts
+from eagle_swing.detection.config import Config
+
+cfg = Config()  # ~40 tunable parameters, frozen dataclass
+result = detect_backswings("video.pkl", "video.MOV", config=cfg)
+contacts = detect_contacts(result, config=cfg)
+
+for i, (bs, ct) in enumerate(zip(result.peak_frames, contacts.contact_frames)):
+    gap = (ct - bs) / result.fps
+    print(f"Swing {i+1}: backswing frame {bs}, contact frame {ct} ({gap:.2f}s downswing)")
+```
+
+### Design Decisions
+
+- **Pure numpy/scipy**: No OpenCV or ML models needed for detection
+- **Frozen dataclass config**: All 40+ parameters are immutable after construction
+- **Robust filtering**: MAD-based outlier removal handles unusual lighting or tracking failures
+- **Follow-through rejection**: Removes false positives where hands are raised after the swing

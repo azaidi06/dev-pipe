@@ -1,0 +1,54 @@
+---
+title: "Biomechanical Swing Analysis with SPM"
+author: "Ali Zaidi"
+date: "2025-11-01"
+categories: [analysis, biomechanics, spm]
+---
+
+## Comparing Good vs Bad Swings
+
+Given a set of labeled golf swings (scored 1-5), we extract biomechanical metrics and use Statistical Parametric Mapping (SPM) to find where good and bad swings differ significantly.
+
+### 17 Biomechanical Metrics
+
+Organized into three groups:
+
+**Rotation**: Shoulder Turn (Proxy), Hip Turn (Proxy), X-Factor (Stretch), Shoulder/Hip Rotational Velocity
+
+**Posture**: Spine Angle, Shoulder Tilt, Hip Tilt, Lead/Trail Knee Angle, Right Elbow Angle
+
+**Linear**: Hip Sway, Head Sway, Head Height, Hand Height, Hand Depth, Hand-Body Distance
+
+### The SPM Approach
+
+Each metric produces a time series per swing. After resampling all swings to 100 frames (0-100% of phase), we run a frame-by-frame Welch's t-test between groups. Only regions where the t-statistic exceeds the critical value for more than 4% of the swing duration are considered significant.
+
+```python
+from eagle_swing.analysis.core import (
+    compute_swing_metrics,
+    perform_spm_1d,
+    resample_1d,
+    filter_noise,
+)
+
+# Compute metrics for each swing
+metrics_a = [compute_swing_metrics(kps) for kps in good_swings]
+metrics_b = [compute_swing_metrics(kps) for kps in bad_swings]
+
+# Resample and compare
+resampled_a = [resample_1d(m["Spine Angle"]) for m in metrics_a]
+resampled_b = [resample_1d(m["Spine Angle"]) for m in metrics_b]
+
+t_stat, sig_mask, p_vals = perform_spm_1d(resampled_a, resampled_b)
+clean_sig = filter_noise(sig_mask, min_duration=4)
+```
+
+### Normalization
+
+Before comparing swings across sessions (different camera angles, distances), we normalize keypoints:
+
+- **Torso diagonal scaling**: Scale by the diagonal of the shoulder-hip rectangle
+- **Hip centering**: Center each frame on the mid-hip point
+- **Savgol smoothing**: Remove jitter while preserving swing dynamics
+
+This allows meaningful comparison of swings recorded weeks apart.

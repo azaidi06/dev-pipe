@@ -1,0 +1,30 @@
+---
+title: "EagleSwing: Unified Golf Swing Analysis"
+author: "Ali Zaidi"
+date: "2025-09-19"
+categories: [news, overview]
+---
+
+EagleSwing merges two codebases into a single, clean package for golf swing analysis:
+
+- **eagle-swing**: Research library for biomechanical analysis (normalization, body metrics, temporal analysis)
+- **golf-pipeline-final**: Production AWS pipeline (video labeling, swing detection, post-processing)
+
+The unified `eagle_swing` package provides:
+
+- **Data loading** that handles both PKL formats transparently
+- **Swing detection** via wrist signal processing (Savitzky-Golay + peak finding)
+- **Biomechanical analysis** with 17 metrics across rotation, posture, and linear categories
+- **Statistical comparison** using SPM (Statistical Parametric Mapping)
+- **Hand-raise detection** for post-swing scoring
+
+```python
+from eagle_swing.data.loader import load_pkl
+from eagle_swing.detection.backswing import detect_backswings
+
+kd = load_pkl("video.pkl")
+result = detect_backswings("video.pkl", "video.MOV")
+print(f"{result.n_swings} swings detected")
+```
+
+See the [docs site](https://azaidi06.github.io/dev-pipe/) for the full API reference and pipeline architecture.

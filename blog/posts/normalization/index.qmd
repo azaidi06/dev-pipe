@@ -1,0 +1,43 @@
+---
+title: "Keypoint Normalization Strategies"
+author: "Ali Zaidi"
+date: "2025-10-25"
+categories: [normalization, preprocessing]
+---
+
+## Why Normalize?
+
+Raw keypoint coordinates are in pixel space. A golfer filmed from 10 feet away produces different pixel values than one filmed from 20 feet. Camera angle, zoom, and golfer height all affect the raw coordinates. Normalization makes swings comparable.
+
+### Available Strategies
+
+The `eagle_swing.analysis.normalization` module provides 7 strategies:
+
+1. **Torso diagonal**: Scale by `||mid_shoulder - mid_hip||` diagonal. Simple, robust.
+2. **Average torso**: Use the time-averaged torso length (reduces frame-to-frame noise).
+3. **Robust median**: Median torso length, clips outliers at 2x MAD. Best for noisy sequences.
+4. **Hip width**: Scale by hip width. Less affected by spine angle changes.
+5. **Shoulder width**: Scale by shoulder width. Good for upper-body metrics.
+6. **Body height**: Scale by full body height (shoulder to ankle). Most variance.
+7. **Procrustes alignment**: Full rigid alignment (translate + scale + rotate) to a reference pose.
+
+### Choosing a Strategy
+
+For **cross-session comparison** (e.g., oct25 vs nov16), `robust_median` works best because it handles the occasional bad frame without distorting the scale.
+
+For **within-session analysis** where camera position is fixed, `torso_diagonal` is sufficient and fastest.
+
+For **animation or visualization**, `procrustes` produces the most visually consistent alignment.
+
+```python
+from eagle_swing.analysis.normalization import (
+    normalize_torso_diagonal,
+    normalize_robust_median,
+    normalize_procrustes,
+)
+
+# kps shape: (N, 17, 2)
+normed = normalize_robust_median(kps)
+# or for Procrustes (requires a reference pose):
+aligned = normalize_procrustes(kps, reference_frame=0)
+```

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+artifacts/
+.env
+*.pkl
+node_modules/
+docs/dist/
