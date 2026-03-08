@@ -21,7 +21,16 @@ def _detect_contact_points(bs_frames, combined, n_pkl, cfg):
             contacts.append(-1)
             continue
         seg = smoothed[s:e + 1]
-        contacts.append(s + np.argmax(seg) if len(seg) > 0 else -1)
+        if len(seg) == 0:
+            contacts.append(-1)
+            continue
+        best = s + int(np.argmax(seg))
+        # Refine: exact peak on unsmoothed combined signal within ±contact_refine_window
+        rw = cfg.contact_refine_window
+        ref_s = max(s, best - rw)
+        ref_e = min(e + 1, best + rw + 1)
+        ref_seg = combined[ref_s:ref_e]
+        contacts.append(ref_s + int(np.argmax(ref_seg)))
     return np.array(contacts, dtype=int), smoothed
 
 

@@ -271,7 +271,7 @@ function TrajectoryPlot({ swing, enabledMethods, voting, showEnsemble, phase = '
     <div>
       {/* Zoomed inset — apex region */}
       <svg viewBox={`0 0 ${zW} ${zH}`} style={{ width: '100%', background: colors.card, borderRadius: 8, border: `1px solid ${colors.accent}30` }}>
-        <text x={zW - 8} y={16} textAnchor="end" fill={colors.accent} fontSize={10} fontFamily="JetBrains Mono, monospace" opacity={0.6}>APEX ZOOM</text>
+        <text x={zW - 8} y={16} textAnchor="end" fill={colors.accent} fontSize={10} fontFamily="JetBrains Mono, monospace" opacity={0.6}>{phase === 'backswing' ? 'APEX ZOOM' : 'CONTACT ZOOM'}</text>
         {renderTrajectory(wx, wy, ztx, zty, n, curv, maxCurv, methods, enabledMethods, methodColors, prodRel, ensIdx, showEnsemble, 1.5, 1.4)}
         <text x={zW / 2} y={zH - 4} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif">x (px)</text>
         <text x={6} y={zH / 2} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif" transform={`rotate(-90,6,${zH / 2})`}>y (px)</text>
@@ -289,10 +289,12 @@ function TrajectoryPlot({ swing, enabledMethods, voting, showEnsemble, phase = '
   );
 }
 
-function SignalPlot({ swing, enabledMethods, voting, showEnsemble }) {
+function SignalPlot({ swing, enabledMethods, voting, showEnsemble, phase = 'backswing' }) {
   const { frames, smoothed } = swing.signal;
-  const { production_rel: prodRel, methods, window_start: wsStart } = swing.backswing;
-  const prodFrame = swing.production_frame;
+  const data = phase === 'backswing' ? swing.backswing : swing.contact;
+  const mColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
+  const { production_rel: prodRel, methods, window_start: wsStart } = data;
+  const prodFrame = prodRel != null ? wsStart + prodRel : null;
 
   if (!frames || frames.length === 0) return null;
 
@@ -315,8 +317,14 @@ function SignalPlot({ swing, enabledMethods, voting, showEnsemble }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 420, background: colors.card, borderRadius: 8, border: `1px solid ${colors.cardBorder}` }}>
       <path d={pathD} fill="none" stroke="#6495ed" strokeWidth={2} />
 
-      {enabledMethods.includes('production') && prodFrame >= xMin && prodFrame <= xMax && (
-        <line x1={tx(prodFrame)} y1={pad} x2={tx(prodFrame)} y2={H - pad} stroke={METHOD_COLORS.production} strokeWidth={2} strokeDasharray="6,3" />
+      {/* Backswing peak reference line (faded) when viewing contact */}
+      {phase === 'contact' && swing.production_frame >= xMin && swing.production_frame <= xMax && (
+        <line x1={tx(swing.production_frame)} y1={pad} x2={tx(swing.production_frame)} y2={H - pad}
+          stroke={colors.textDim} strokeWidth={1} strokeDasharray="3,3" opacity={0.4} />
+      )}
+
+      {enabledMethods.includes('production') && prodFrame != null && prodFrame >= xMin && prodFrame <= xMax && (
+        <line x1={tx(prodFrame)} y1={pad} x2={tx(prodFrame)} y2={H - pad} stroke={mColors.production} strokeWidth={2} strokeDasharray="6,3" />
       )}
 
       {Object.entries(methods).map(([name, idx]) => {
@@ -324,7 +332,7 @@ function SignalPlot({ swing, enabledMethods, voting, showEnsemble }) {
         const f = wsStart + idx;
         if (f < xMin || f > xMax) return null;
         return (
-          <line key={name} x1={tx(f)} y1={pad} x2={tx(f)} y2={H - pad} stroke={METHOD_COLORS[name] || colors.accent} strokeWidth={1.5} strokeDasharray="4,2" />
+          <line key={name} x1={tx(f)} y1={pad} x2={tx(f)} y2={H - pad} stroke={mColors[name] || colors.accent} strokeWidth={1.5} strokeDasharray="4,2" />
         );
       })}
 
@@ -369,21 +377,23 @@ function StatBox({ label, value, color = colors.accent }) {
   );
 }
 
-function DiffTable({ swing, enabledMethods, voting }) {
-  const bs = swing.backswing;
-  const prod = bs.production_rel;
-  const ensIdx = computeEnsemble(bs.methods, voting, enabledMethods.filter(m => m !== 'production'));
+function DiffTable({ swing, enabledMethods, voting, phase = 'backswing' }) {
+  const data = phase === 'backswing' ? swing.backswing : swing.contact;
+  const mColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
+  const mLabels = phase === 'backswing' ? METHOD_LABELS : CONTACT_LABELS;
+  const prod = data.production_rel;
+  const ensIdx = computeEnsemble(data.methods, voting, enabledMethods.filter(m => m !== 'production'));
 
   const rows = [];
   if (enabledMethods.includes('production') && prod != null) {
-    rows.push({ name: 'Production', frame: bs.window_start + prod, rel: prod, color: METHOD_COLORS.production });
+    rows.push({ name: 'Production', frame: data.window_start + prod, rel: prod, color: mColors.production });
   }
-  Object.entries(bs.methods).forEach(([name, idx]) => {
+  Object.entries(data.methods).forEach(([name, idx]) => {
     if (!enabledMethods.includes(name) || idx == null) return;
-    rows.push({ name: METHOD_LABELS[name]?.split('—')[0]?.trim() || name, frame: bs.window_start + idx, rel: idx, color: METHOD_COLORS[name] });
+    rows.push({ name: mLabels[name]?.split('—')[0]?.trim() || name, frame: data.window_start + idx, rel: idx, color: mColors[name] });
   });
   if (ensIdx != null) {
-    rows.push({ name: `Ensemble (${VOTING_LABELS[voting]})`, frame: bs.window_start + ensIdx, rel: ensIdx, color: colors.green });
+    rows.push({ name: `Ensemble (${VOTING_LABELS[voting]})`, frame: data.window_start + ensIdx, rel: ensIdx, color: colors.green });
   }
 
   return (
@@ -444,22 +454,24 @@ const RefinementExplorer = () => {
   const sessions = useMemo(() => data ? data.summary.sessions : [], [data]);
   const filteredSwings = useMemo(() => {
     if (!data) return [];
-    const bsMethods = enabledBS.filter(m => m !== 'production');
+    const methods = (phase === 'backswing' ? enabledBS : enabledCT).filter(m => m !== 'production');
     let swings = enabledSessions === null ? data.swings : data.swings.filter(s => enabledSessions.includes(s.session));
     if (validatedOnly) {
       swings = swings.filter(s => s.validated);
     }
     if (minDiff > 0) {
       swings = swings.filter(s => {
-        const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
+        const phaseData = s[phase];
+        if (!phaseData || !phaseData.wrist_x || phaseData.wrist_x.length === 0) return false;
+        const cropped = cropPhaseData(phaseData, winBefore, winAfter, phase);
         const prod = cropped.production_rel;
-        const ens = computeEnsemble(cropped.methods, voting, bsMethods);
+        const ens = computeEnsemble(cropped.methods, voting, methods);
         if (prod == null || ens == null) return false;
         return Math.abs(prod - ens) >= minDiff;
       });
     }
     return swings;
-  }, [data, enabledSessions, minDiff, validatedOnly, enabledBS, voting, winBefore, winAfter]);
+  }, [data, enabledSessions, minDiff, validatedOnly, phase, enabledBS, enabledCT, voting, winBefore, winAfter]);
 
   // Reset selection when filters change
   const swing = filteredSwings[Math.min(selectedSwing, Math.max(0, filteredSwings.length - 1))] || null;
@@ -491,14 +503,16 @@ const RefinementExplorer = () => {
   // Aggregate stats with current settings (using cropped window)
   const aggStats = useMemo(() => {
     if (!data) return null;
-    const bsMethods = enabledBS.filter(m => m !== 'production');
+    const methods = (phase === 'backswing' ? enabledBS : enabledCT).filter(m => m !== 'production');
     let diffs = [];
     let pool = enabledSessions === null ? data.swings : data.swings.filter(s => enabledSessions.includes(s.session));
     if (validatedOnly) pool = pool.filter(s => s.validated);
     pool.forEach(s => {
-      const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
+      const phaseData = s[phase];
+      if (!phaseData || !phaseData.wrist_x || phaseData.wrist_x.length === 0) return;
+      const cropped = cropPhaseData(phaseData, winBefore, winAfter, phase);
       const prod = cropped.production_rel;
-      const ens = computeEnsemble(cropped.methods, voting, bsMethods);
+      const ens = computeEnsemble(cropped.methods, voting, methods);
       if (prod != null && ens != null) diffs.push(Math.abs(prod - ens));
     });
     if (diffs.length === 0) return { mean: 0, agree1: 0, agree3: 0, differ5: 0, n: 0 };
@@ -509,7 +523,7 @@ const RefinementExplorer = () => {
       differ5: (diffs.filter(d => d >= 5).length / diffs.length * 100).toFixed(0),
       n: diffs.length,
     };
-  }, [data, enabledBS, voting, winBefore, winAfter, validatedOnly, enabledSessions]);
+  }, [data, phase, enabledBS, enabledCT, voting, winBefore, winAfter, validatedOnly, enabledSessions]);
 
   if (loading) {
     return (
@@ -542,7 +556,7 @@ const RefinementExplorer = () => {
           WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.02em',
         }}>Refinement Explorer</h1>
         <p style={{ color: colors.textDim, fontSize: 14, margin: 0 }}>
-          Compare 1D production vs 2D ensemble backswing apex detection across {data.summary.total_swings} swings
+          Compare 1D production vs 2D ensemble detection across {data.summary.total_swings} swings
         </p>
       </div>
 
@@ -698,7 +712,7 @@ const RefinementExplorer = () => {
       {/* Main visualization */}
       {croppedSwing && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
-          <CollapsibleCard title="2D Wrist Trajectory" sub={`${phase} — zoomed apex + overview`} icon="📐" defaultOpen={true}>
+          <CollapsibleCard title="2D Wrist Trajectory" sub={`${phase} — zoomed ${phase === 'backswing' ? 'apex' : 'impact'} + overview`} icon="📐" defaultOpen={true}>
             <TrajectoryPlot swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
             <div style={{ marginTop: 10 }}>
               <Legend entries={
@@ -715,7 +729,7 @@ const RefinementExplorer = () => {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
             <CollapsibleCard title="1D Combined Signal" sub="smoothed" icon="📈" defaultOpen={true}>
-              <SignalPlot swing={croppedSwing} enabledMethods={enabledBS} voting={voting} showEnsemble={showEnsemble} />
+              <SignalPlot swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
             </CollapsibleCard>
 
             <CollapsibleCard title="Skeleton Scrubber" sub="frame by frame" icon="🦴" defaultOpen={true}>
@@ -728,7 +742,7 @@ const RefinementExplorer = () => {
       {/* Frame comparison table */}
       {croppedSwing && (
         <CollapsibleCard title="Frame Picks" sub="per method" icon="📊" defaultOpen={true}>
-          <DiffTable swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} />
+          <DiffTable swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} phase={phase} />
         </CollapsibleCard>
       )}
     </div>

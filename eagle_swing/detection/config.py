@@ -37,6 +37,7 @@ class Config:
     contact_search_max: int = 90
     contact_savgol_window: int = 5
     contact_savgol_poly: int = 2
+    contact_refine_window: int = 10
     # Problem flagging
     min_expected_swings: int = 2
     max_expected_swings: int = 15

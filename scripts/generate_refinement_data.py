@@ -179,7 +179,7 @@ def process_one_video(info):
 
         # 1D signal window for visualization
         sig_start = max(0, peak - 60)
-        sig_end = min(len(result.smoothed), peak + 60)
+        sig_end = min(len(result.smoothed), peak + 100)
         signal_frames = list(range(sig_start, sig_end))
         signal_smoothed = result.smoothed[sig_start:sig_end].tolist()
 
@@ -220,26 +220,38 @@ def process_one_video(info):
     return swings
 
 
-def compute_summary(all_swings):
-    """Compute aggregate stats across all swings."""
+def _phase_stats(all_swings, phase_key):
+    """Compute prod vs ensemble diffs for a given phase."""
     diffs = []
     for s in all_swings:
-        bs = s['backswing']
-        prod = bs['production_rel']
-        ens_mean = bs['voting'].get('mean')
+        p = s[phase_key]
+        prod = p['production_rel']
+        ens_mean = p['voting'].get('mean')
         if prod is not None and ens_mean is not None:
             diffs.append(abs(prod - ens_mean))
+    if not diffs:
+        return {'mean_abs_diff': 0, 'median_abs_diff': 0,
+                'pct_agree_1frame': 0, 'pct_agree_3frame': 0, 'pct_differ_5plus': 0}
+    return {
+        'mean_abs_diff': float(np.mean(diffs)),
+        'median_abs_diff': float(np.median(diffs)),
+        'pct_agree_1frame': float(np.mean([d <= 1 for d in diffs]) * 100),
+        'pct_agree_3frame': float(np.mean([d <= 3 for d in diffs]) * 100),
+        'pct_differ_5plus': float(np.mean([d >= 5 for d in diffs]) * 100),
+    }
 
+
+def compute_summary(all_swings):
+    """Compute aggregate stats across all swings."""
     sessions = sorted(set(s['session'] for s in all_swings))
+    bs_stats = _phase_stats(all_swings, 'backswing')
+    ct_stats = _phase_stats(all_swings, 'contact')
     return {
         'total_swings': len(all_swings),
         'total_videos': len(set(s['video'] for s in all_swings)),
         'sessions': sessions,
-        'mean_abs_diff': float(np.mean(diffs)) if diffs else 0,
-        'median_abs_diff': float(np.median(diffs)) if diffs else 0,
-        'pct_agree_1frame': float(np.mean([d <= 1 for d in diffs]) * 100) if diffs else 0,
-        'pct_agree_3frame': float(np.mean([d <= 3 for d in diffs]) * 100) if diffs else 0,
-        'pct_differ_5plus': float(np.mean([d >= 5 for d in diffs]) * 100) if diffs else 0,
+        **bs_stats,
+        'contact': ct_stats,
     }
 
 
