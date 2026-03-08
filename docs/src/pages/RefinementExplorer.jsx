@@ -157,65 +157,134 @@ function computeEnsemble(picks, voting, enabledMethods) {
   return null;
 }
 
-function TrajectoryPlot({ swing, enabledMethods, voting, showEnsemble, phase = 'backswing' }) {
-  const data = phase === 'backswing' ? swing.backswing : swing.contact;
-  const methodColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
-  const methodLabels = phase === 'backswing' ? METHOD_LABELS : CONTACT_LABELS;
-  const { wrist_x: wx, wrist_y: wy, production_rel: prodRel, methods } = data;
+function computeCurvature(wx, wy) {
+  // Discrete curvature: angle change between consecutive segments
+  const curv = new Float64Array(wx.length);
+  for (let i = 1; i < wx.length - 1; i++) {
+    const ax = wx[i] - wx[i - 1], ay = wy[i] - wy[i - 1];
+    const bx = wx[i + 1] - wx[i], by = wy[i + 1] - wy[i];
+    const dot = ax * bx + ay * by;
+    const cross = ax * by - ay * bx;
+    curv[i] = Math.abs(Math.atan2(cross, dot));
+  }
+  return curv;
+}
 
-  if (!wx || wx.length === 0) return null;
+function getPickIndices(methods, enabledMethods, prodRel, ensIdx) {
+  const picks = [];
+  if (enabledMethods.includes('production') && prodRel != null && prodRel >= 0) picks.push(prodRel);
+  Object.entries(methods).forEach(([name, idx]) => {
+    if (enabledMethods.includes(name) && idx != null && idx >= 0) picks.push(idx);
+  });
+  if (ensIdx != null && ensIdx >= 0) picks.push(ensIdx);
+  return picks;
+}
 
-  const pad = 20;
-  const W = 400, H = 320;
-  const xMin = Math.min(...wx), xMax = Math.max(...wx);
-  const yMin = Math.min(...wy), yMax = Math.max(...wy);
-  const xRange = xMax - xMin || 1, yRange = yMax - yMin || 1;
-  const scale = Math.min((W - 2 * pad) / xRange, (H - 2 * pad) / yRange);
-  const xOff = pad + ((W - 2 * pad) - xRange * scale) / 2;
-  const yOff = pad + ((H - 2 * pad) - yRange * scale) / 2;
-  const tx = i => xOff + (wx[i] - xMin) * scale;
-  const ty = i => yOff + (wy[i] - yMin) * scale;
-
-  const n = wx.length;
-  const ensIdx = showEnsemble
-    ? computeEnsemble(methods, voting, enabledMethods.filter(m => m !== 'production'))
-    : null;
-
-  const pathD = wx.map((_, i) => `${i === 0 ? 'M' : 'L'}${tx(i).toFixed(1)},${ty(i).toFixed(1)}`).join(' ');
-
+function renderTrajectory(wx, wy, txFn, tyFn, n, curv, maxCurv, methods, enabledMethods, methodColors, prodRel, ensIdx, showEnsemble, dotScale = 1, markerScale = 1) {
+  const pathD = wx.map((_, i) => `${i === 0 ? 'M' : 'L'}${txFn(i).toFixed(1)},${tyFn(i).toFixed(1)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 420, background: colors.card, borderRadius: 8, border: `1px solid ${colors.cardBorder}` }}>
+    <>
       <path d={pathD} fill="none" stroke={colors.textDim} strokeWidth={1} opacity={0.4} />
       {wx.map((_, i) => {
         const t = n > 1 ? i / (n - 1) : 0;
         const r = Math.round(30 + t * 100);
         const g = Math.round(80 + t * 140);
         const b = Math.round(120 + t * 80);
-        return <circle key={i} cx={tx(i)} cy={ty(i)} r={3} fill={`rgb(${r},${g},${b})`} opacity={0.7} />;
+        const c = maxCurv > 0 ? curv[i] / maxCurv : 0;
+        const radius = (1.5 + c * 5) * dotScale;
+        const opacity = 0.4 + c * 0.6;
+        return <circle key={i} cx={txFn(i)} cy={tyFn(i)} r={radius} fill={`rgb(${r},${g},${b})`} opacity={opacity} />;
       })}
-
       {enabledMethods.includes('production') && prodRel != null && prodRel >= 0 && prodRel < n && (
-        <MarkerSvg shape="X" x={tx(prodRel)} y={ty(prodRel)} size={10} color={methodColors.production} />
+        <MarkerSvg shape="X" x={txFn(prodRel)} y={tyFn(prodRel)} size={10 * markerScale} color={methodColors.production} />
       )}
-
       {Object.entries(methods).map(([name, idx]) => {
         if (!enabledMethods.includes(name) || idx == null || idx < 0 || idx >= n) return null;
-        return (
-          <MarkerSvg key={name} shape={MARKER_SHAPES[name]} x={tx(idx)} y={ty(idx)} size={7} color={methodColors[name]} />
-        );
+        return <MarkerSvg key={name} shape={MARKER_SHAPES[name]} x={txFn(idx)} y={tyFn(idx)} size={7 * markerScale} color={methodColors[name]} />;
       })}
-
       {showEnsemble && ensIdx != null && ensIdx >= 0 && ensIdx < n && (
-        <MarkerSvg shape="star" x={tx(ensIdx)} y={ty(ensIdx)} size={10} color={colors.green} />
+        <MarkerSvg shape="star" x={txFn(ensIdx)} y={tyFn(ensIdx)} size={10 * markerScale} color={colors.green} />
       )}
+    </>
+  );
+}
 
-      <text x={W / 2} y={H - 4} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif">
-        x (px)
-      </text>
-      <text x={6} y={H / 2} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif" transform={`rotate(-90,6,${H / 2})`}>
-        y (px)
-      </text>
-    </svg>
+function TrajectoryPlot({ swing, enabledMethods, voting, showEnsemble, phase = 'backswing' }) {
+  const data = phase === 'backswing' ? swing.backswing : swing.contact;
+  const methodColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
+  const { wrist_x: wx, wrist_y: wy, production_rel: prodRel, methods } = data;
+
+  if (!wx || wx.length === 0) return null;
+
+  const n = wx.length;
+  const curv = computeCurvature(wx, wy);
+  const maxCurv = Math.max(...curv) || 1;
+  const ensIdx = showEnsemble
+    ? computeEnsemble(methods, voting, enabledMethods.filter(m => m !== 'production'))
+    : null;
+
+  // --- Overview (full trajectory, compact) ---
+  const oW = 500, oH = 160, oPad = 16;
+  const oxMin = Math.min(...wx), oxMax = Math.max(...wx);
+  const oyMin = Math.min(...wy), oyMax = Math.max(...wy);
+  const oxR = oxMax - oxMin || 1, oyR = oyMax - oyMin || 1;
+  const oScale = Math.min((oW - 2 * oPad) / oxR, (oH - 2 * oPad) / oyR);
+  const oxOff = oPad + ((oW - 2 * oPad) - oxR * oScale) / 2;
+  const oyOff = oPad + ((oH - 2 * oPad) - oyR * oScale) / 2;
+  const otx = i => oxOff + (wx[i] - oxMin) * oScale;
+  const oty = i => oyOff + (wy[i] - oyMin) * oScale;
+
+  // --- Zoomed inset (around method picks) ---
+  const zW = 500, zH = 380, zPad = 28;
+  const picks = getPickIndices(methods, enabledMethods, prodRel, ensIdx);
+  let zxMin, zxMax, zyMin, zyMax;
+  if (picks.length > 0) {
+    const px = picks.filter(p => p < n).map(p => wx[p]);
+    const py = picks.filter(p => p < n).map(p => wy[p]);
+    const cxMin = Math.min(...px), cxMax = Math.max(...px);
+    const cyMin = Math.min(...py), cyMax = Math.max(...py);
+    // Expand by 3x the pick spread (or minimum 5% of full range) for context
+    const xSpread = Math.max(cxMax - cxMin, oxR * 0.05);
+    const ySpread = Math.max(cyMax - cyMin, oyR * 0.05);
+    const margin = 2.0;
+    const cx = (cxMin + cxMax) / 2, cy = (cyMin + cyMax) / 2;
+    zxMin = cx - xSpread * margin; zxMax = cx + xSpread * margin;
+    zyMin = cy - ySpread * margin; zyMax = cy + ySpread * margin;
+  } else {
+    zxMin = oxMin; zxMax = oxMax; zyMin = oyMin; zyMax = oyMax;
+  }
+  const zxR = zxMax - zxMin || 1, zyR = zyMax - zyMin || 1;
+  const zScale = Math.min((zW - 2 * zPad) / zxR, (zH - 2 * zPad) / zyR);
+  const zxOff = zPad + ((zW - 2 * zPad) - zxR * zScale) / 2;
+  const zyOff = zPad + ((zH - 2 * zPad) - zyR * zScale) / 2;
+  const ztx = i => zxOff + (wx[i] - zxMin) * zScale;
+  const zty = i => zyOff + (wy[i] - zyMin) * zScale;
+
+  // Zoom box coords in overview space
+  const zBoxL = oxOff + (zxMin - oxMin) * oScale;
+  const zBoxT = oyOff + (zyMin - oyMin) * oScale;
+  const zBoxW = zxR * oScale;
+  const zBoxH = zyR * oScale;
+
+  return (
+    <div>
+      {/* Zoomed inset — apex region */}
+      <svg viewBox={`0 0 ${zW} ${zH}`} style={{ width: '100%', background: colors.card, borderRadius: 8, border: `1px solid ${colors.accent}30` }}>
+        <text x={zW - 8} y={16} textAnchor="end" fill={colors.accent} fontSize={10} fontFamily="JetBrains Mono, monospace" opacity={0.6}>APEX ZOOM</text>
+        {renderTrajectory(wx, wy, ztx, zty, n, curv, maxCurv, methods, enabledMethods, methodColors, prodRel, ensIdx, showEnsemble, 1.5, 1.4)}
+        <text x={zW / 2} y={zH - 4} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif">x (px)</text>
+        <text x={6} y={zH / 2} textAnchor="middle" fill={colors.textDim} fontSize={10} fontFamily="DM Sans, sans-serif" transform={`rotate(-90,6,${zH / 2})`}>y (px)</text>
+      </svg>
+
+      {/* Overview — full trajectory, compact */}
+      <svg viewBox={`0 0 ${oW} ${oH}`} style={{ width: '100%', marginTop: 8, background: colors.card, borderRadius: 8, border: `1px solid ${colors.cardBorder}` }}>
+        <text x={oW - 8} y={14} textAnchor="end" fill={colors.textDim} fontSize={9} fontFamily="JetBrains Mono, monospace" opacity={0.5}>OVERVIEW</text>
+        {renderTrajectory(wx, wy, otx, oty, n, curv, maxCurv, methods, enabledMethods, methodColors, prodRel, ensIdx, showEnsemble, 0.7, 0.8)}
+        {/* Zoom box indicator */}
+        <rect x={zBoxL} y={zBoxT} width={Math.max(zBoxW, 4)} height={Math.max(zBoxH, 4)}
+          fill="none" stroke={colors.accent} strokeWidth={1.5} strokeDasharray="4,2" opacity={0.7} rx={2} />
+      </svg>
+    </div>
   );
 }
 
@@ -571,8 +640,8 @@ const RefinementExplorer = () => {
 
       {/* Main visualization */}
       {croppedSwing && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, marginBottom: 20 }}>
-          <CollapsibleCard title="2D Wrist Trajectory" sub={phase} icon="📐" defaultOpen={true}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+          <CollapsibleCard title="2D Wrist Trajectory" sub={`${phase} — zoomed apex + overview`} icon="📐" defaultOpen={true}>
             <TrajectoryPlot swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
             <div style={{ marginTop: 10 }}>
               <Legend entries={
