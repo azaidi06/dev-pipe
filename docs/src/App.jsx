@@ -9,6 +9,7 @@ import Analysis from './pages/Analysis';
 import DeployCosts from './pages/DeployCosts';
 import DataFormats from './pages/DataFormats';
 import ScoreHandComparison from './pages/ScoreHandComparison';
+import RefinementExplorer from './pages/RefinementExplorer';
 
 const TABS = [
   { id: 'overview', label: 'Overview', component: Overview },
@@ -17,6 +18,7 @@ const TABS = [
   { id: 'label', label: 'Labeling', component: LabelVideos },
   { id: 'swing', label: 'Detection', component: SwingDetection },
   { id: 'scorehand', label: 'Score-Hand', component: ScoreHandComparison },
+  { id: 'refine', label: 'Refinement', component: RefinementExplorer },
   { id: 'analysis', label: 'Analysis', component: Analysis },
   { id: 'deploy', label: 'Deploy', component: DeployCosts },
   { id: 'data', label: 'Data', component: DataFormats },
