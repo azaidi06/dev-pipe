@@ -37,10 +37,11 @@ DATA_ROOT = os.environ.get(
 )
 
 # Refinement window sizes (frames before/after the production peak)
-BS_BEFORE = 15
-BS_AFTER = 25
-CT_OFFSET_MIN = 10
-CT_OFFSET_MAX = 50
+# Store wide windows; the React UI crops client-side via sliders
+BS_BEFORE = 40
+BS_AFTER = 50
+CT_OFFSET_MIN = 5
+CT_OFFSET_MAX = 70
 
 
 def find_pkl_files(root):

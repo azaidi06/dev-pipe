@@ -80,6 +80,62 @@ function MarkerSvg({ shape, x, y, size = 8, color, stroke = 'white', strokeWidth
   return null;
 }
 
+function cropPhaseData(phaseData, before, after, direction) {
+  const { wrist_x, wrist_y, production_rel: prodRel, methods } = phaseData;
+  if (!wrist_x || wrist_x.length === 0 || prodRel == null) return phaseData;
+
+  const cropStart = Math.max(0, prodRel - before);
+  const cropEnd = Math.min(wrist_x.length, prodRel + after + 1);
+  const cx = wrist_x.slice(cropStart, cropEnd);
+  const cy = wrist_y.slice(cropStart, cropEnd);
+  const newProd = prodRel - cropStart;
+
+  // Recompute geometric methods on cropped window
+  const newMethods = {};
+  if (direction === 'backswing') {
+    newMethods.argmin_y = argminArr(cy);
+    newMethods.argmin_xy = argminSumArr(cx, cy);
+    // velocity_zero: keep original if in range, else null
+    const vzOrig = methods.velocity_zero;
+    newMethods.velocity_zero = (vzOrig != null && vzOrig >= cropStart && vzOrig < cropEnd) ? vzOrig - cropStart : null;
+  } else {
+    newMethods.argmax_y = argmaxArr(cy);
+    newMethods.argmax_xy = argmaxSumArr(cx, cy);
+    newMethods.argmax_x = argmaxArr(cx);
+  }
+
+  return {
+    ...phaseData,
+    wrist_x: cx,
+    wrist_y: cy,
+    production_rel: newProd,
+    methods: newMethods,
+    window_start: phaseData.window_start + cropStart,
+    window_end: phaseData.window_start + cropEnd,
+  };
+}
+
+function argminArr(arr) {
+  let mi = 0;
+  for (let i = 1; i < arr.length; i++) if (arr[i] < arr[mi]) mi = i;
+  return mi;
+}
+function argmaxArr(arr) {
+  let mi = 0;
+  for (let i = 1; i < arr.length; i++) if (arr[i] > arr[mi]) mi = i;
+  return mi;
+}
+function argminSumArr(ax, ay) {
+  let mi = 0, mv = ax[0] + ay[0];
+  for (let i = 1; i < ax.length; i++) { const v = ax[i] + ay[i]; if (v < mv) { mv = v; mi = i; } }
+  return mi;
+}
+function argmaxSumArr(ax, ay) {
+  let mi = 0, mv = ax[0] + ay[0];
+  for (let i = 1; i < ax.length; i++) { const v = ax[i] + ay[i]; if (v > mv) { mv = v; mi = i; } }
+  return mi;
+}
+
 function computeEnsemble(picks, voting, enabledMethods) {
   const valid = enabledMethods
     .map(m => picks[m])
@@ -303,6 +359,8 @@ const RefinementExplorer = () => {
   const [showEnsemble, setShowEnsemble] = useState(true);
   const [filterSession, setFilterSession] = useState('all');
   const [phase, setPhase] = useState('backswing');
+  const [winBefore, setWinBefore] = useState(12);
+  const [winAfter, setWinAfter] = useState(18);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/refinement_data.json`)
@@ -322,19 +380,36 @@ const RefinementExplorer = () => {
   const toggleBS = useCallback(m => setEnabledBS(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]), []);
   const toggleCT = useCallback(m => setEnabledCT(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]), []);
 
+  // Crop swing data based on window sliders
+  const croppedSwing = useMemo(() => {
+    if (!swing) return null;
+    const dir = phase === 'backswing' ? 'backswing' : 'contact';
+    const croppedPhase = cropPhaseData(swing[dir], winBefore, winAfter, dir);
+    return { ...swing, [dir]: croppedPhase };
+  }, [swing, winBefore, winAfter, phase]);
+
+  // Max window bounds for current swing
+  const winMax = useMemo(() => {
+    if (!swing) return { before: 40, after: 50 };
+    const d = phase === 'backswing' ? swing.backswing : swing.contact;
+    const prod = d.production_rel ?? 0;
+    return { before: prod, after: (d.wrist_x?.length ?? 0) - prod - 1 };
+  }, [swing, phase]);
+
   const enabledMethods = phase === 'backswing' ? enabledBS : enabledCT;
   const methodColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
   const methodLabels = phase === 'backswing' ? METHOD_LABELS : CONTACT_LABELS;
   const toggleMethod = phase === 'backswing' ? toggleBS : toggleCT;
 
-  // Aggregate stats with current settings
+  // Aggregate stats with current settings (using cropped window)
   const aggStats = useMemo(() => {
     if (!data) return null;
     const bsMethods = enabledBS.filter(m => m !== 'production');
     let diffs = [];
     data.swings.forEach(s => {
-      const prod = s.backswing.production_rel;
-      const ens = computeEnsemble(s.backswing.methods, voting, bsMethods);
+      const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
+      const prod = cropped.production_rel;
+      const ens = computeEnsemble(cropped.methods, voting, bsMethods);
       if (prod != null && ens != null) diffs.push(Math.abs(prod - ens));
     });
     if (diffs.length === 0) return { mean: 0, agree1: 0, agree3: 0, differ5: 0, n: 0 };
@@ -345,7 +420,7 @@ const RefinementExplorer = () => {
       differ5: (diffs.filter(d => d >= 5).length / diffs.length * 100).toFixed(0),
       n: diffs.length,
     };
-  }, [data, enabledBS, voting]);
+  }, [data, enabledBS, voting, winBefore, winAfter]);
 
   if (loading) {
     return (
@@ -429,6 +504,27 @@ const RefinementExplorer = () => {
             <ToggleButton label={showEnsemble ? "Ensemble: ON" : "Ensemble: OFF"} active={showEnsemble} color={colors.green} onClick={() => setShowEnsemble(!showEnsemble)} />
           </div>
 
+          {/* Window size sliders */}
+          <div>
+            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Window Around Peak</div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 180 }}>
+                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 50 }}>Before</span>
+                <input type="range" min={2} max={winMax.before} value={Math.min(winBefore, winMax.before)}
+                  onChange={e => setWinBefore(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: colors.accent }} />
+                <span style={{ fontSize: 12, color: colors.accent, fontFamily: "'JetBrains Mono', monospace", minWidth: 28, textAlign: 'right' }}>{Math.min(winBefore, winMax.before)}f</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 180 }}>
+                <span style={{ fontSize: 12, color: colors.textMuted, minWidth: 50 }}>After</span>
+                <input type="range" min={2} max={winMax.after} value={Math.min(winAfter, winMax.after)}
+                  onChange={e => setWinAfter(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: colors.accent }} />
+                <span style={{ fontSize: 12, color: colors.accent, fontFamily: "'JetBrains Mono', monospace", minWidth: 28, textAlign: 'right' }}>{Math.min(winAfter, winMax.after)}f</span>
+              </div>
+            </div>
+          </div>
+
           {/* Session filter */}
           <div>
             <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Session</div>
@@ -474,10 +570,10 @@ const RefinementExplorer = () => {
       )}
 
       {/* Main visualization */}
-      {swing && (
+      {croppedSwing && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, marginBottom: 20 }}>
           <CollapsibleCard title="2D Wrist Trajectory" sub={phase} icon="📐" defaultOpen={true}>
-            <TrajectoryPlot swing={swing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
+            <TrajectoryPlot swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
             <div style={{ marginTop: 10 }}>
               <Legend entries={
                 [
@@ -492,15 +588,15 @@ const RefinementExplorer = () => {
           </CollapsibleCard>
 
           <CollapsibleCard title="1D Combined Signal" sub="smoothed" icon="📈" defaultOpen={true}>
-            <SignalPlot swing={swing} enabledMethods={enabledBS} voting={voting} showEnsemble={showEnsemble} />
+            <SignalPlot swing={croppedSwing} enabledMethods={enabledBS} voting={voting} showEnsemble={showEnsemble} />
           </CollapsibleCard>
         </div>
       )}
 
       {/* Frame comparison table */}
-      {swing && (
+      {croppedSwing && (
         <CollapsibleCard title="Frame Picks" sub="per method" icon="📊" defaultOpen={true}>
-          <DiffTable swing={swing} enabledMethods={enabledMethods} voting={voting} />
+          <DiffTable swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} />
         </CollapsibleCard>
       )}
     </div>
