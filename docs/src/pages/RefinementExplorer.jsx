@@ -713,9 +713,15 @@ const RefinementExplorer = () => {
             </div>
           </CollapsibleCard>
 
-          <CollapsibleCard title="1D Combined Signal" sub="smoothed" icon="📈" defaultOpen={true}>
-            <SignalPlot swing={croppedSwing} enabledMethods={enabledBS} voting={voting} showEnsemble={showEnsemble} />
-          </CollapsibleCard>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
+            <CollapsibleCard title="1D Combined Signal" sub="smoothed" icon="📈" defaultOpen={true}>
+              <SignalPlot swing={croppedSwing} enabledMethods={enabledBS} voting={voting} showEnsemble={showEnsemble} />
+            </CollapsibleCard>
+
+            <CollapsibleCard title="Skeleton Scrubber" sub="frame by frame" icon="🦴" defaultOpen={true}>
+              <SkeletonScrubber swing={croppedSwing} enabledMethods={enabledMethods} voting={voting} showEnsemble={showEnsemble} phase={phase} />
+            </CollapsibleCard>
+          </div>
         </div>
       )}
 
@@ -728,6 +734,129 @@ const RefinementExplorer = () => {
     </div>
   );
 };
+
+// COCO skeleton connections
+const SKELETON_EDGES = [
+  [0, 1], [0, 2], [1, 3], [2, 4],           // head
+  [5, 6],                                      // shoulders
+  [5, 7], [7, 9],                              // left arm
+  [6, 8], [8, 10],                             // right arm
+  [5, 11], [6, 12],                            // torso
+  [11, 12],                                    // hips
+  [11, 13], [13, 15],                          // left leg
+  [12, 14], [14, 16],                          // right leg
+];
+
+const KP_COLORS = {
+  0: '#fff',                                    // nose
+  1: '#8ff', 2: '#8ff', 3: '#8ff', 4: '#8ff', // eyes/ears
+  5: '#4f8', 6: '#f84',                        // shoulders (L green, R red)
+  7: '#4f8', 8: '#f84',                        // elbows
+  9: '#4f8', 10: '#f84',                       // wrists
+  11: '#4f8', 12: '#f84',                      // hips
+  13: '#4f8', 14: '#f84',                      // knees
+  15: '#4f8', 16: '#f84',                      // ankles
+};
+
+function SkeletonScrubber({ swing, enabledMethods, voting, showEnsemble, phase }) {
+  const [frameIdx, setFrameIdx] = useState(null);
+  const skel = swing?.skeleton;
+  if (!skel || !skel.keypoints || skel.keypoints.length === 0) return null;
+
+  const nFrames = skel.keypoints.length;
+  const peakRel = skel.peak_rel;
+  const currentFrame = frameIdx ?? peakRel;
+
+  const kps = skel.keypoints[currentFrame]; // (17, 2)
+  const scores = skel.scores[currentFrame]; // (17,)
+
+  // Compute bounds from all frames for stable viewport
+  let allX = [], allY = [];
+  skel.keypoints.forEach(frame => frame.forEach(([x, y]) => {
+    if (x > 0 && y > 0) { allX.push(x); allY.push(y); }
+  }));
+  const xMin = Math.min(...allX), xMax = Math.max(...allX);
+  const yMin = Math.min(...allY), yMax = Math.max(...allY);
+  const xRange = xMax - xMin || 1, yRange = yMax - yMin || 1;
+
+  const W = 350, H = 450, pad = 20;
+  const scale = Math.min((W - 2 * pad) / xRange, (H - 2 * pad) / yRange);
+  const xOff = pad + ((W - 2 * pad) - xRange * scale) / 2;
+  const yOff = pad + ((H - 2 * pad) - yRange * scale) / 2;
+  const tx = x => xOff + (x - xMin) * scale;
+  const ty = y => yOff + (y - yMin) * scale;
+
+  // Which methods pick this frame?
+  const bs = phase === 'backswing' ? swing.backswing : swing.contact;
+  const mColors = phase === 'backswing' ? METHOD_COLORS : CONTACT_COLORS;
+  const absFrame = skel.start_frame + currentFrame;
+  const pickedBy = [];
+  if (enabledMethods.includes('production') && bs.production_rel != null && bs.window_start + bs.production_rel === absFrame)
+    pickedBy.push({ label: 'Prod', color: mColors.production });
+  Object.entries(bs.methods).forEach(([name, idx]) => {
+    if (enabledMethods.includes(name) && idx != null && bs.window_start + idx === absFrame)
+      pickedBy.push({ label: name.replace('arg', '').replace('_', ''), color: mColors[name] });
+  });
+  if (showEnsemble) {
+    const ensMethods = enabledMethods.filter(m => m !== 'production');
+    const ensIdx = computeEnsemble(bs.methods, voting, ensMethods);
+    if (ensIdx != null && bs.window_start + ensIdx === absFrame)
+      pickedBy.push({ label: 'Ens', color: colors.green });
+  }
+
+  // Frame label color
+  const frameDist = currentFrame - peakRel;
+  const frameColor = frameDist === 0 ? colors.accent : frameDist < 0 ? '#4f8' : '#f84';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+        <button onClick={() => setFrameIdx(Math.max(0, (frameIdx ?? peakRel) - 1))}
+          style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${colors.cardBorder}`, background: colors.card, color: colors.text, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>←</button>
+        <input type="range" min={0} max={nFrames - 1} value={currentFrame}
+          onChange={e => setFrameIdx(Number(e.target.value))}
+          style={{ flex: 1, accentColor: colors.accent }} />
+        <button onClick={() => setFrameIdx(Math.min(nFrames - 1, (frameIdx ?? peakRel) + 1))}
+          style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${colors.cardBorder}`, background: colors.card, color: colors.text, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>→</button>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: frameColor, minWidth: 90, textAlign: 'right' }}>
+          F{skel.start_frame + currentFrame} ({frameDist >= 0 ? '+' : ''}{frameDist})
+        </span>
+      </div>
+
+      {/* Picked-by badges */}
+      {pickedBy.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {pickedBy.map((p, i) => (
+            <span key={i} style={{
+              padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+              background: `${p.color}25`, color: p.color, border: `1px solid ${p.color}60`,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>{p.label}</span>
+          ))}
+        </div>
+      )}
+
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 380, background: colors.card, borderRadius: 8, border: `1px solid ${colors.cardBorder}` }}>
+        {/* Skeleton edges */}
+        {SKELETON_EDGES.map(([a, b], ei) => {
+          if (scores[a] < 0.3 || scores[b] < 0.3) return null;
+          const [ax, ay] = kps[a], [bx, by] = kps[b];
+          if (ax <= 0 || ay <= 0 || bx <= 0 || by <= 0) return null;
+          return <line key={ei} x1={tx(ax)} y1={ty(ay)} x2={tx(bx)} y2={ty(by)}
+            stroke={colors.textDim} strokeWidth={2} opacity={0.6} />;
+        })}
+        {/* Keypoint dots */}
+        {kps.map(([x, y], ki) => {
+          if (scores[ki] < 0.3 || x <= 0 || y <= 0) return null;
+          const isWrist = ki === 9 || ki === 10;
+          return <circle key={ki} cx={tx(x)} cy={ty(y)} r={isWrist ? 6 : 4}
+            fill={KP_COLORS[ki] || colors.textMuted} stroke={isWrist ? 'white' : 'none'}
+            strokeWidth={isWrist ? 2 : 0} opacity={0.5 + scores[ki] * 0.5} />;
+        })}
+      </svg>
+    </div>
+  );
+}
 
 function Legend({ entries }) {
   return (

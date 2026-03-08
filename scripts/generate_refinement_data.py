@@ -164,6 +164,19 @@ def process_one_video(info):
             if cf >= 0:
                 ct_prod_rel = cf - ct_start
 
+        # Full skeleton keypoints for frame scrubber (±10 around peak)
+        skel_before, skel_after = 10, 10
+        skel_start = max(0, peak - skel_before)
+        skel_end = min(n_frames, peak + skel_after + 1)
+        skel_kps = all_kps[skel_start:skel_end]  # (F, 17, 2)
+        skel_scores = all_scores[skel_start:skel_end]  # (F, 17)
+        skeleton_data = {
+            'start_frame': skel_start,
+            'peak_rel': peak - skel_start,
+            'keypoints': np.round(skel_kps, 1).tolist(),  # round to 0.1px to save space
+            'scores': np.round(skel_scores, 2).tolist(),
+        }
+
         # 1D signal window for visualization
         sig_start = max(0, peak - 60)
         sig_end = min(len(result.smoothed), peak + 60)
@@ -196,6 +209,7 @@ def process_one_video(info):
                 'methods': {k: v for k, v in ct_picks.items()},
                 'voting': ct_voting,
             },
+            'skeleton': skeleton_data,
             'signal': {
                 'frames': signal_frames,
                 'smoothed': signal_smoothed,
