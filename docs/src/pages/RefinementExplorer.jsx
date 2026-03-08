@@ -432,6 +432,7 @@ const RefinementExplorer = () => {
   const [winBefore, setWinBefore] = useState(8);
   const [winAfter, setWinAfter] = useState(8);
   const [minDiff, setMinDiff] = useState(0);
+  const [validatedOnly, setValidatedOnly] = useState(true);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/refinement_data.json`)
@@ -445,6 +446,9 @@ const RefinementExplorer = () => {
     if (!data) return [];
     const bsMethods = enabledBS.filter(m => m !== 'production');
     let swings = filterSession === 'all' ? data.swings : data.swings.filter(s => s.session === filterSession);
+    if (validatedOnly) {
+      swings = swings.filter(s => s.validated);
+    }
     if (minDiff > 0) {
       swings = swings.filter(s => {
         const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
@@ -455,7 +459,7 @@ const RefinementExplorer = () => {
       });
     }
     return swings;
-  }, [data, filterSession, minDiff, enabledBS, voting, winBefore, winAfter]);
+  }, [data, filterSession, minDiff, validatedOnly, enabledBS, voting, winBefore, winAfter]);
 
   // Reset selection when filters change
   const swing = filteredSwings[Math.min(selectedSwing, Math.max(0, filteredSwings.length - 1))] || null;
@@ -489,7 +493,8 @@ const RefinementExplorer = () => {
     if (!data) return null;
     const bsMethods = enabledBS.filter(m => m !== 'production');
     let diffs = [];
-    data.swings.forEach(s => {
+    const pool = validatedOnly ? data.swings.filter(s => s.validated) : data.swings;
+    pool.forEach(s => {
       const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
       const prod = cropped.production_rel;
       const ens = computeEnsemble(cropped.methods, voting, bsMethods);
@@ -503,7 +508,7 @@ const RefinementExplorer = () => {
       differ5: (diffs.filter(d => d >= 5).length / diffs.length * 100).toFixed(0),
       n: diffs.length,
     };
-  }, [data, enabledBS, voting, winBefore, winAfter]);
+  }, [data, enabledBS, voting, winBefore, winAfter, validatedOnly]);
 
   if (loading) {
     return (
@@ -605,6 +610,15 @@ const RefinementExplorer = () => {
                   style={{ flex: 1, accentColor: colors.accent }} />
                 <span style={{ fontSize: 12, color: colors.accent, fontFamily: "'JetBrains Mono', monospace", minWidth: 28, textAlign: 'right' }}>{Math.min(winAfter, winMax.after)}f</span>
               </div>
+            </div>
+          </div>
+
+          {/* Score-hand validation filter */}
+          <div>
+            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Swing Validation</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <ToggleButton label={validatedOnly ? "Score-Hand Validated Only" : "All Detections (incl. non-swings)"} active={validatedOnly} color={colors.green}
+                onClick={() => { setValidatedOnly(!validatedOnly); setSelectedSwing(0); }} />
             </div>
           </div>
 

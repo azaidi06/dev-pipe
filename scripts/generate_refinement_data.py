@@ -28,6 +28,7 @@ from eagle_swing.detection.refine import (
     get_all_method_picks,
     refine_backswing_apex,
     refine_contact_point,
+    validate_peaks_with_score_hand,
     VOTING_STRATEGIES,
 )
 
@@ -113,6 +114,13 @@ def process_one_video(info):
     if result.n_swings == 0:
         return []
 
+    # Extract full keypoints for score-hand validation
+    pkl_data = result.pkl_data
+    n_frames = sum(1 for k in pkl_data if isinstance(k, str) and k.startswith("frame_"))
+    all_kps = np.array([pkl_data[f"frame_{i}"]["keypoints"] for i in range(n_frames)])
+    all_scores = np.array([pkl_data[f"frame_{i}"]["keypoint_scores"] for i in range(n_frames)])
+    validated = validate_peaks_with_score_hand(result.peak_frames, all_kps, all_scores)
+
     contact_result = detect_contacts(result)
     swings = []
 
@@ -169,6 +177,7 @@ def process_one_video(info):
             'swing_idx': si,
             'production_frame': peak,
             'fps': float(result.fps) if result.fps else None,
+            'validated': bool(validated[si]),
             'backswing': {
                 'window_start': bs_start,
                 'window_end': bs_start + len(rw_x),

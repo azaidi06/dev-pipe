@@ -218,3 +218,132 @@ def refine_contact_point(wrist_xy, methods=None, voting='mean'):
         'voting': voting,
         'n_methods': len(valid),
     }
+
+
+# --- Score-hand swing validation ---
+
+def find_score_hand(kps, scores, min_consecutive=30, max_gap=1, conf_threshold=0.3):
+    """Detect follow-through sequences where ONE wrist is above the shoulder.
+
+    Parameters
+    ----------
+    kps : np.ndarray
+        (N, 17, 2) keypoint coordinates.
+    scores : np.ndarray
+        (N, 17) confidence scores.
+    min_consecutive : int
+        Minimum consecutive frames for a valid sequence.
+    max_gap : int
+        Maximum gap frames to bridge.
+    conf_threshold : float
+        Minimum confidence for relevant keypoints.
+
+    Returns
+    -------
+    list of dict with keys: start_frame, end_frame, length, wrist_above ('left'|'right')
+    """
+    n = len(kps)
+    idxs = [5, 6, 7, 8, 9, 10]  # shoulders, elbows, wrists
+    valid = np.ones(n, dtype=bool)
+    for idx in idxs:
+        valid &= scores[:, idx] >= conf_threshold
+
+    l_above = (
+        (kps[:, 9, 1] < kps[:, 5, 1]) &   # l_wrist above l_shoulder
+        (kps[:, 9, 1] < kps[:, 7, 1]) &   # l_wrist above l_elbow
+        (kps[:, 10, 1] > kps[:, 6, 1])    # r_wrist below r_shoulder
+    )
+    r_above = (
+        (kps[:, 10, 1] < kps[:, 6, 1]) &  # r_wrist above r_shoulder
+        (kps[:, 10, 1] < kps[:, 8, 1]) &  # r_wrist above r_elbow
+        (kps[:, 9, 1] > kps[:, 5, 1])     # l_wrist below l_shoulder
+    )
+
+    label = np.zeros(n, dtype=int)
+    label[l_above & valid] = 1
+    label[r_above & valid] = 2
+
+    sequences = []
+    i = 0
+    while i < n:
+        cur = label[i]
+        if cur > 0:
+            start = i
+            end = i
+            while i < n:
+                if label[i] == cur:
+                    end = i
+                    i += 1
+                elif label[i] == 0:
+                    bridged = False
+                    for look in range(1, max_gap + 1):
+                        if i + look < n and label[i + look] == cur:
+                            i += look
+                            bridged = True
+                            break
+                        elif i + look < n and label[i + look] != 0:
+                            break
+                    if not bridged:
+                        break
+                else:
+                    break
+            length = end - start + 1
+            if length >= min_consecutive:
+                sequences.append({
+                    'start_frame': start, 'end_frame': end,
+                    'length': length,
+                    'wrist_above': 'left' if cur == 1 else 'right',
+                })
+        else:
+            i += 1
+    return sequences
+
+
+def find_both_wrists_above(kps, scores, conf_threshold=0.5):
+    """Find frames where BOTH wrists are above BOTH shoulders and elbows."""
+    idxs = [5, 6, 7, 8, 9, 10]
+    valid = np.ones(len(kps), dtype=bool)
+    for idx in idxs:
+        valid &= scores[:, idx] >= conf_threshold
+
+    both = (
+        (kps[:, 9, 1] < kps[:, 7, 1]) &
+        (kps[:, 10, 1] < kps[:, 8, 1]) &
+        (kps[:, 9, 1] < kps[:, 5, 1]) &
+        (kps[:, 10, 1] < kps[:, 6, 1]) &
+        valid
+    )
+    return np.where(both)[0]
+
+
+def validate_peaks_with_score_hand(peak_frames, kps, scores,
+                                   follow_through_window=120,
+                                   backswing_window=60,
+                                   min_consecutive=20,
+                                   conf_threshold=0.3):
+    """Validate detected peaks by checking for anatomical swing signatures.
+
+    A peak is validated if:
+    1. There is a score-hand follow-through within follow_through_window
+       frames AFTER the peak, OR
+    2. There are >=3 frames with both wrists above shoulders within
+       backswing_window frames BEFORE the peak.
+    """
+    sequences = find_score_hand(kps, scores,
+                                min_consecutive=min_consecutive,
+                                conf_threshold=conf_threshold)
+    both_above = find_both_wrists_above(kps, scores, conf_threshold=conf_threshold)
+
+    validated = np.zeros(len(peak_frames), dtype=bool)
+    for i, peak in enumerate(peak_frames):
+        peak = int(peak)
+        for seq in sequences:
+            if seq['start_frame'] > peak and seq['start_frame'] - peak <= follow_through_window:
+                validated[i] = True
+                break
+        if validated[i]:
+            continue
+        before = both_above[(both_above >= peak - backswing_window) & (both_above <= peak)]
+        if len(before) >= 3:
+            validated[i] = True
+    return validated
