@@ -187,12 +187,13 @@ function renderTrajectory(wx, wy, txFn, tyFn, n, curv, maxCurv, methods, enabled
       <path d={pathD} fill="none" stroke={colors.textDim} strokeWidth={1} opacity={0.4} />
       {wx.map((_, i) => {
         const t = n > 1 ? i / (n - 1) : 0;
-        const r = Math.round(30 + t * 100);
-        const g = Math.round(80 + t * 140);
-        const b = Math.round(120 + t * 80);
+        // Green (early) → Yellow (mid) → Red (late)
+        const r = Math.round(t < 0.5 ? t * 2 * 220 : 220);
+        const g = Math.round(t < 0.5 ? 180 : 180 * (1 - (t - 0.5) * 2));
+        const b = Math.round(30 * (1 - t));
         const c = maxCurv > 0 ? curv[i] / maxCurv : 0;
         const radius = (1.5 + c * 5) * dotScale;
-        const opacity = 0.4 + c * 0.6;
+        const opacity = 0.5 + c * 0.5;
         return <circle key={i} cx={txFn(i)} cy={tyFn(i)} r={radius} fill={`rgb(${r},${g},${b})`} opacity={opacity} />;
       })}
       {enabledMethods.includes('production') && prodRel != null && prodRel >= 0 && prodRel < n && (
@@ -428,8 +429,8 @@ const RefinementExplorer = () => {
   const [showEnsemble, setShowEnsemble] = useState(true);
   const [filterSession, setFilterSession] = useState('all');
   const [phase, setPhase] = useState('backswing');
-  const [winBefore, setWinBefore] = useState(12);
-  const [winAfter, setWinAfter] = useState(18);
+  const [winBefore, setWinBefore] = useState(8);
+  const [winAfter, setWinAfter] = useState(8);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/refinement_data.json`)
