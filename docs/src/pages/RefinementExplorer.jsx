@@ -774,7 +774,13 @@ const KP_COLORS = {
 
 function SkeletonScrubber({ swing, enabledMethods, voting, showEnsemble, phase }) {
   const [frameIdx, setFrameIdx] = useState(null);
-  const skel = swing?.skeleton;
+  const [prevPhase, setPrevPhase] = useState(phase);
+  // Reset scrubber position when phase changes
+  if (phase !== prevPhase) {
+    setPrevPhase(phase);
+    setFrameIdx(null);
+  }
+  const skel = phase === 'contact' && swing?.contact_skeleton ? swing.contact_skeleton : swing?.skeleton;
   if (!skel || !skel.keypoints || skel.keypoints.length === 0) return null;
 
   const nFrames = skel.keypoints.length;

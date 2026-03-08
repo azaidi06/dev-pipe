@@ -164,18 +164,23 @@ def process_one_video(info):
             if cf >= 0:
                 ct_prod_rel = cf - ct_start
 
-        # Full skeleton keypoints for frame scrubber (±10 around peak)
-        skel_before, skel_after = 10, 10
-        skel_start = max(0, peak - skel_before)
-        skel_end = min(n_frames, peak + skel_after + 1)
-        skel_kps = all_kps[skel_start:skel_end]  # (F, 17, 2)
-        skel_scores = all_scores[skel_start:skel_end]  # (F, 17)
-        skeleton_data = {
-            'start_frame': skel_start,
-            'peak_rel': peak - skel_start,
-            'keypoints': np.round(skel_kps, 1).tolist(),  # round to 0.1px to save space
-            'scores': np.round(skel_scores, 2).tolist(),
-        }
+        # Full skeleton keypoints for frame scrubber (±10 around landmark)
+        def _make_skeleton(center_frame):
+            skel_before, skel_after = 10, 10
+            s = max(0, center_frame - skel_before)
+            e = min(n_frames, center_frame + skel_after + 1)
+            return {
+                'start_frame': s,
+                'peak_rel': center_frame - s,
+                'keypoints': np.round(all_kps[s:e], 1).tolist(),
+                'scores': np.round(all_scores[s:e], 2).tolist(),
+            }
+
+        skeleton_data = _make_skeleton(peak)
+
+        # Contact skeleton (centered on production contact frame)
+        cf = int(contact_result.contact_frames[si])
+        contact_skeleton_data = _make_skeleton(cf) if cf >= 0 else None
 
         # 1D signal window for visualization
         sig_start = max(0, peak - 60)
@@ -210,6 +215,7 @@ def process_one_video(info):
                 'voting': ct_voting,
             },
             'skeleton': skeleton_data,
+            'contact_skeleton': contact_skeleton_data,
             'signal': {
                 'frames': signal_frames,
                 'smoothed': signal_smoothed,
