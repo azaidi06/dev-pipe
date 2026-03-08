@@ -427,7 +427,7 @@ const RefinementExplorer = () => {
   const [enabledCT, setEnabledCT] = useState(['production', 'argmax_y', 'argmax_xy', 'argmax_x']);
   const [voting, setVoting] = useState('mean');
   const [showEnsemble, setShowEnsemble] = useState(true);
-  const [filterSession, setFilterSession] = useState('all');
+  const [enabledSessions, setEnabledSessions] = useState(null); // null = all
   const [phase, setPhase] = useState('backswing');
   const [winBefore, setWinBefore] = useState(8);
   const [winAfter, setWinAfter] = useState(8);
@@ -445,7 +445,7 @@ const RefinementExplorer = () => {
   const filteredSwings = useMemo(() => {
     if (!data) return [];
     const bsMethods = enabledBS.filter(m => m !== 'production');
-    let swings = filterSession === 'all' ? data.swings : data.swings.filter(s => s.session === filterSession);
+    let swings = enabledSessions === null ? data.swings : data.swings.filter(s => enabledSessions.includes(s.session));
     if (validatedOnly) {
       swings = swings.filter(s => s.validated);
     }
@@ -459,7 +459,7 @@ const RefinementExplorer = () => {
       });
     }
     return swings;
-  }, [data, filterSession, minDiff, validatedOnly, enabledBS, voting, winBefore, winAfter]);
+  }, [data, enabledSessions, minDiff, validatedOnly, enabledBS, voting, winBefore, winAfter]);
 
   // Reset selection when filters change
   const swing = filteredSwings[Math.min(selectedSwing, Math.max(0, filteredSwings.length - 1))] || null;
@@ -493,7 +493,8 @@ const RefinementExplorer = () => {
     if (!data) return null;
     const bsMethods = enabledBS.filter(m => m !== 'production');
     let diffs = [];
-    const pool = validatedOnly ? data.swings.filter(s => s.validated) : data.swings;
+    let pool = enabledSessions === null ? data.swings : data.swings.filter(s => enabledSessions.includes(s.session));
+    if (validatedOnly) pool = pool.filter(s => s.validated);
     pool.forEach(s => {
       const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
       const prod = cropped.production_rel;
@@ -508,7 +509,7 @@ const RefinementExplorer = () => {
       differ5: (diffs.filter(d => d >= 5).length / diffs.length * 100).toFixed(0),
       n: diffs.length,
     };
-  }, [data, enabledBS, voting, winBefore, winAfter, validatedOnly]);
+  }, [data, enabledBS, voting, winBefore, winAfter, validatedOnly, enabledSessions]);
 
   if (loading) {
     return (
@@ -633,14 +634,31 @@ const RefinementExplorer = () => {
             </div>
           </div>
 
-          {/* Session filter */}
+          {/* Session filter (multi-select) */}
           <div>
-            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Session</div>
+            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sessions</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <ToggleButton label="All" active={filterSession === 'all'} color={colors.purple} onClick={() => { setFilterSession('all'); setSelectedSwing(0); }} />
-              {sessions.map(s => (
-                <ToggleButton key={s} label={s} active={filterSession === s} color={colors.purple} onClick={() => { setFilterSession(s); setSelectedSwing(0); }} />
-              ))}
+              <ToggleButton label="All" active={enabledSessions === null} color={colors.purple}
+                onClick={() => { setEnabledSessions(null); setSelectedSwing(0); }} />
+              {sessions.map(s => {
+                const active = enabledSessions === null || enabledSessions.includes(s);
+                return (
+                  <ToggleButton key={s} label={s} active={active} color={colors.purple}
+                    onClick={() => {
+                      setSelectedSwing(0);
+                      if (enabledSessions === null) {
+                        // Switching from "all" → deselect this one session
+                        setEnabledSessions(sessions.filter(x => x !== s));
+                      } else if (active) {
+                        const next = enabledSessions.filter(x => x !== s);
+                        setEnabledSessions(next.length === 0 ? null : next);
+                      } else {
+                        const next = [...enabledSessions, s];
+                        setEnabledSessions(next.length === sessions.length ? null : next);
+                      }
+                    }} />
+                );
+              })}
             </div>
           </div>
         </div>
