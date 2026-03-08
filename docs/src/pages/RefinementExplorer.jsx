@@ -431,6 +431,7 @@ const RefinementExplorer = () => {
   const [phase, setPhase] = useState('backswing');
   const [winBefore, setWinBefore] = useState(8);
   const [winAfter, setWinAfter] = useState(8);
+  const [minDiff, setMinDiff] = useState(0);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/refinement_data.json`)
@@ -442,10 +443,22 @@ const RefinementExplorer = () => {
   const sessions = useMemo(() => data ? data.summary.sessions : [], [data]);
   const filteredSwings = useMemo(() => {
     if (!data) return [];
-    return filterSession === 'all' ? data.swings : data.swings.filter(s => s.session === filterSession);
-  }, [data, filterSession]);
+    const bsMethods = enabledBS.filter(m => m !== 'production');
+    let swings = filterSession === 'all' ? data.swings : data.swings.filter(s => s.session === filterSession);
+    if (minDiff > 0) {
+      swings = swings.filter(s => {
+        const cropped = cropPhaseData(s.backswing, winBefore, winAfter, 'backswing');
+        const prod = cropped.production_rel;
+        const ens = computeEnsemble(cropped.methods, voting, bsMethods);
+        if (prod == null || ens == null) return false;
+        return Math.abs(prod - ens) >= minDiff;
+      });
+    }
+    return swings;
+  }, [data, filterSession, minDiff, enabledBS, voting, winBefore, winAfter]);
 
-  const swing = filteredSwings[selectedSwing] || null;
+  // Reset selection when filters change
+  const swing = filteredSwings[Math.min(selectedSwing, Math.max(0, filteredSwings.length - 1))] || null;
 
   const toggleBS = useCallback(m => setEnabledBS(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]), []);
   const toggleCT = useCallback(m => setEnabledCT(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]), []);
@@ -592,6 +605,17 @@ const RefinementExplorer = () => {
                   style={{ flex: 1, accentColor: colors.accent }} />
                 <span style={{ fontSize: 12, color: colors.accent, fontFamily: "'JetBrains Mono', monospace", minWidth: 28, textAlign: 'right' }}>{Math.min(winAfter, winMax.after)}f</span>
               </div>
+            </div>
+          </div>
+
+          {/* Min difference filter */}
+          <div>
+            <div style={{ fontSize: 11, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Min |diff| (prod vs ensemble)</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[0, 1, 2, 3, 4, 5, 8, 10].map(v => (
+                <ToggleButton key={v} label={v === 0 ? 'All' : `≥${v}f`} active={minDiff === v} color={colors.rose}
+                  onClick={() => { setMinDiff(v); setSelectedSwing(0); }} />
+              ))}
             </div>
           </div>
 
